@@ -1,10 +1,10 @@
-![RemoteOBR]
-===============
+RemoteOBR
+=========
 
 Description
 -----------
 
-[RemoteOBR] is a client/server implementation of the OSGi Bundle Repository.
+RemoteOBR is a client/server implementation of the OSGi Bundle Repository.
 
 Synopsis
 --------
