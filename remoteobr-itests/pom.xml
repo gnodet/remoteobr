@@ -28,8 +28,14 @@
     </parent>
 
     <artifactId>remoteobr-itests</artifactId>
+    <name>RemoteOBR Tests</name>
 
     <dependencies>
+        <dependency>
+            <groupId>org.apache.geronimo.specs</groupId>
+            <artifactId>geronimo-servlet_2.5_spec</artifactId>
+            <scope>test</scope>
+        </dependency>
         <dependency>
             <groupId>org.fusesource.remoteobr</groupId>
             <artifactId>remoteobr-client</artifactId>

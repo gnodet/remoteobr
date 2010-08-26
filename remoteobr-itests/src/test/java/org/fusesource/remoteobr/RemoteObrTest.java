@@ -64,8 +64,10 @@ public class RemoteObrTest {
 
         EasyMock.replay(bundleContext, systemBundle);
 
+        String repositoryUrl = getClass().getClassLoader().getResource("test.xml").toExternalForm();
+
         RepositoryAdmin ra = new RepositoryAdminImpl(bundleContext, null);
-        ra.addRepository("file:///Users/gnodet/.m2/repository/repository.xml");
+        ra.addRepository(repositoryUrl);
         Application.setAdmin(ra);
 
         Server server = new Server();
@@ -91,9 +93,9 @@ public class RemoteObrTest {
                                                     new SystemRepositoryImpl(bundleContext, null),
                                                     new LocalRepositoryImpl(bundleContext, null));
 
-        Repository repo = admin.addRepository("file:/Users/gnodet/.m2/repository/repository.xml");
+        Repository repo = admin.addRepository(repositoryUrl);
         assertNotNull(repo);
-        assertEquals("file:/Users/gnodet/.m2/repository/repository.xml", repo.getURI());
+        assertEquals(repositoryUrl, repo.getURI());
         Resource[] res = repo.getResources();
         assertNotNull(res);
         assertNotNull(res[0]);

@@ -29,6 +29,7 @@
 
     <artifactId>remoteobr-server</artifactId>
     <packaging>bundle</packaging>
+    <name>RemoteOBR Server</name>
 
     <dependencies>
         <dependency>
