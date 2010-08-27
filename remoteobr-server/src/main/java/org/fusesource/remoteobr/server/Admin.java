@@ -10,6 +10,7 @@ import java.lang.annotation.Annotation;
 import java.lang.reflect.Type;
 import java.util.ArrayList;
 import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import javax.ws.rs.Consumes;
@@ -47,6 +48,8 @@ import org.apache.felix.utils.filter.FilterImpl;
 import org.kxml2.io.KXmlParser;
 import org.osgi.framework.Filter;
 import org.osgi.framework.InvalidSyntaxException;
+import org.xmlpull.v1.XmlPullParser;
+import org.xmlpull.v1.XmlPullParserException;
 
 
 @Path("/obr")
@@ -77,7 +80,7 @@ public class Admin {
     @Produces("application/xml")
     public RepositoryRefs getRepositories() {
         List<RepositoryRef> repos = new ArrayList<RepositoryRef>();
-        for (org.apache.felix.bundlerepository.Repository repo : admin.listRepositories()) {
+        for (Repository repo : admin.listRepositories()) {
             repos.add(new RepositoryRef(repo.getURI()));
         }
         return new RepositoryRefs(repos);
@@ -87,7 +90,7 @@ public class Admin {
     @Path("repositories/{repId}")
     @Produces("application/xml")
     public Repository getRepository(@PathParam("repId") String repId) {
-        for (org.apache.felix.bundlerepository.Repository repo : admin.listRepositories()) {
+        for (Repository repo : admin.listRepositories()) {
             if (repo.getURI().equals(repId)) {
                 return repo;
             }
@@ -113,7 +116,7 @@ public class Admin {
     @Path("repositories/{repId}/resources")
     @Produces("application/xml")
     public ResourceRefs getResources(@PathParam("repId") String repId) {
-        for (org.apache.felix.bundlerepository.Repository repo : admin.listRepositories()) {
+        for (Repository repo : admin.listRepositories()) {
             if (repo.getURI().equals(repId)) {
                 List<ResourceRef> res = new ArrayList<ResourceRef>();
                 for (org.apache.felix.bundlerepository.Resource r : repo.getResources()) {
@@ -205,23 +208,34 @@ public class Admin {
         for (Resource res : params.getAddedResources()) {
             resolver.add(res);
         }
-        resolver.resolve(params.getFlags());
         Resolution res = new Resolution();
-        res.setRequiredResources(new ArrayList<ResourceRef>());
-        for (Resource resource : resolver.getRequiredResources()) {
-            ResourceImpl r = (ResourceImpl) resource;
-            res.getRequiredResources().add(new ResourceRef(r.getRepository().getURI(), r.getId()));
-        }
-        res.setOptionalResources(new ArrayList<ResourceRef>());
-        for (Resource resource : resolver.getOptionalResources()) {
-            ResourceImpl r = (ResourceImpl) resource;
-            res.getOptionalResources().add(new ResourceRef(r.getRepository().getURI(), r.getId()));
-        }
-        res.setUnsatisfiedRequirements(new ArrayList<Reason>());
-        for (Reason reason : resolver.getUnsatisfiedRequirements()) {
-            res.getUnsatisfiedRequirements().add(reason);
+        if (resolver.resolve(params.getFlags())) {
+            for (Resource resource : resolver.getRequiredResources()) {
+                ResourceImpl r = (ResourceImpl) resource;
+                ResourceRef ref = new ResourceRef(r.getRepository().getURI(), r.getId());
+                res.getRequiredResources().add(ref);
+                List<ReasonRef> reasons = new ArrayList<ReasonRef>();
+                for (Reason reason : resolver.getReason(r)) {
+                    reasons.add(getReasonRef(reason));
+                }
+                res.getReasons().put(ref, reasons);
+            }
+            for (Resource resource : resolver.getOptionalResources()) {
+                ResourceImpl r = (ResourceImpl) resource;
+                res.getOptionalResources().add(new ResourceRef(r.getRepository().getURI(), r.getId()));
+            }
+        } else {
+            for (Reason reason : resolver.getUnsatisfiedRequirements()) {
+                res.getUnsatisfiedRequirements().add(getReasonRef(reason));
+            }
         }
         return res;
+    }
+
+    private ReasonRef getReasonRef(Reason reason) {
+        ResourceImpl r = (ResourceImpl) reason.getResource();
+        ResourceRef ref = new ResourceRef(r.getRepository() != null ? r.getRepository().getURI() : null, r.getId());
+        return new ReasonRef(reason.getRequirement(), ref);
     }
 
     private Filter createFilter(String filter) {
@@ -229,6 +243,147 @@ public class Admin {
             return filter != null ? FilterImpl.newInstance(filter) : null;
         } catch (InvalidSyntaxException e) {
             return null;
+        }
+    }
+
+    private static void writeResourceRefs(XmlWriter w, ResourceRefs refs) throws IOException {
+        w.element(RESOURCES);
+        for (ResourceRef ref : refs.getResources()) {
+            writeResourceRef(w, ref);
+        }
+        w.end();
+    }
+    private static void writeResourceRef(XmlWriter w, ResourceRef resourceRef) throws IOException
+    {
+        w.element(RESOURCE);
+        w.attribute(ID, resourceRef.getId());
+        if (resourceRef.getRepository() != null) {
+            w.attribute(REPOSITORY, resourceRef.getRepository());
+        }
+        w.end();
+    }
+
+    private static void writeRequirement(XmlWriter w, Requirement requirement) throws IOException
+    {
+        w.element(RepositoryParser.REQUIRE)
+            .attribute(RepositoryParser.NAME, requirement.getName())
+            .attribute(RepositoryParser.FILTER, requirement.getFilter())
+            .attribute(RepositoryParser.EXTEND, Boolean.toString(requirement.isExtend()))
+            .attribute(RepositoryParser.MULTIPLE, Boolean.toString(requirement.isMultiple()))
+            .attribute(RepositoryParser.OPTIONAL, Boolean.toString(requirement.isOptional()))
+            .text(requirement.getComment().trim())
+            .end();
+    }
+
+    private static void writeResolution(XmlWriter w, Resolution resolution) throws IOException {
+        w.element(RESOLUTION);
+        w.element("required-resources");
+        for (ResourceRef ref : resolution.getRequiredResources()) {
+            writeResourceRef(w, ref);
+        }
+        w.end();
+        w.element("optional-resources");
+        for (ResourceRef ref : resolution.getOptionalResources()) {
+            writeResourceRef(w, ref);
+        }
+        w.end();
+        w.element("reasons");
+        // TODO
+        w.end();
+        w.element("unsatisfied-requirements");
+        for (ReasonRef reason : resolution.getUnsatisfiedRequirements()) {
+            w.element("reason");
+            writeResourceRef(w, reason.getResource());
+            writeRequirement(w, reason.getRequirement());
+            w.end();
+        }
+        w.end();
+        w.end();
+    }
+
+    private static void writeRepositoryRefs(XmlWriter w, RepositoryRefs refs) throws IOException {
+        w.element(REPOSITORIES);
+        for (RepositoryRef repositoryRef : refs.getRepositories()) {
+            writeRepositoryRef(w, repositoryRef);
+        }
+        w.end();
+    }
+
+    private static void writeRepositoryRef(XmlWriter w, RepositoryRef repositoryRef) throws IOException {
+        w.element(REPOSITORY);
+        w.attribute(ID, repositoryRef.getId());
+        w.end();
+    }
+
+    private static void writeRepository(XmlWriter w, Repository repository) throws IOException {
+        w.element(REPOSITORY);
+        w.attribute(NAME, repository.getName());
+        w.attribute(URL, repository.getURI());
+        w.attribute(LASTMODIFIED, repository.getLastModified());
+        if (repository instanceof RepositoryImpl) {
+            Referral[] referrals = ((RepositoryImpl) repository).getReferrals();
+            if (referrals != null) {
+                for (Referral referral : referrals) {
+                    w.element(REFERRAL);
+                    w.attribute(DEPTH, referral.getDepth());
+                    w.attribute(URL, referral.getUrl());
+                    w.end();
+                }
+            }
+        }
+        for (Resource res : repository.getResources()) {
+            writeResourceRef(w, new ResourceRef(null, res.getId()));
+        }
+        w.end();
+    }
+
+    private static void sanityCheckEndElement(XmlPullParser reader, int event, String element) {
+        if (event != XmlPullParser.END_TAG || !element.equals(reader.getName())) {
+            throw new IllegalStateException("Unexpected state while finishing element " + element);
+        }
+    }
+
+    public static abstract class AbstractProvider<T> implements MessageBodyWriter<T>, MessageBodyReader<T> {
+
+        public boolean isWriteable(Class<?> aClass, Type type, Annotation[] annotations, MediaType mediaType) {
+            return  getMessageClass().isAssignableFrom(aClass)
+                        && MediaType.valueOf(MediaType.APPLICATION_XML).equals(mediaType);
+        }
+
+        public long getSize(T t, Class<?> aClass, Type type, Annotation[] annotations, MediaType mediaType) {
+            return -1;
+        }
+
+        public void writeTo(T t, Class<?> aClass, Type type, Annotation[] annotations, MediaType mediaType, MultivaluedMap<String, Object> stringObjectMultivaluedMap, OutputStream outputStream) throws IOException, WebApplicationException {
+            Writer osw = new OutputStreamWriter(outputStream);
+            XmlWriter w = new XmlWriter(osw);
+            writeXml(w, t);
+            osw.flush();
+        }
+
+        public boolean isReadable(Class<?> aClass, Type type, Annotation[] annotations, MediaType mediaType) {
+            return  getMessageClass().isAssignableFrom(aClass)
+                        && MediaType.valueOf(MediaType.APPLICATION_XML).equals(mediaType);
+        }
+
+        public T readFrom(Class<T> t, Type type, Annotation[] annotations, MediaType mediaType, MultivaluedMap<String, String> stringStringMultivaluedMap, InputStream inputStream) throws IOException, WebApplicationException {
+            try {
+                KXmlParser parser = new KXmlParser();
+                parser.setInput(new InputStreamReader(inputStream));
+                return parseXml(parser);
+            } catch (Exception e) {
+                throw new IOException(e);
+            }
+        }
+
+        protected abstract Class<T> getMessageClass();
+
+        protected void writeXml(XmlWriter w, T t) throws IOException {
+            throw new UnsupportedOperationException();
+        }
+
+        protected T parseXml(KXmlParser parser) throws IOException, XmlPullParserException {
+            throw new UnsupportedOperationException();
         }
     }
 
@@ -248,7 +403,9 @@ public class Admin {
                 }
                 Resolve params = new Resolve();
                 while (parser.nextTag() == KXmlParser.START_TAG) {
-                    if (REPOSITORIES.equals(parser.getName())) {
+                    if ("flags".equals(parser.getName())) {
+                        params.setFlags(Integer.parseInt(parser.nextText()));
+                    } else if (REPOSITORIES.equals(parser.getName())) {
                         while (parser.nextTag() == KXmlParser.START_TAG && REPOSITORY.equals(parser.getName())) {
                             String id = parser.getAttributeValue(null, ID);
                             params.getRepositories().add(id);
@@ -259,6 +416,16 @@ public class Admin {
                             Resource res = new PullParser().parseResource(parser);
                             params.getAddedResources().add(res);
                         }
+                    } else if ("added-requirements".equals(parser.getName())) {
+                        while (parser.nextTag() == KXmlParser.START_TAG && RepositoryParser.REQUIRE.equals(parser.getName())) {
+                            Requirement req = new PullParser().parseRequire(parser);
+                            params.getAddedRequirements().add(req);
+                        }
+                    } else if ("global-capabilities".equals(parser.getName())) {
+                        while (parser.nextTag() == KXmlParser.START_TAG && RepositoryParser.CAPABILITY.equals(parser.getName())) {
+                            Capability cap = new PullParser().parseCapability(parser);
+                            params.getGlobalCapabilities().add(cap);
+                        }
                     } else if ("local-resources".equals(parser.getName())) {
                         while (parser.nextTag() == KXmlParser.START_TAG && RESOURCE.equals(parser.getName())) {
                             Resource res = new PullParser().parseResource(parser);
@@ -266,7 +433,6 @@ public class Admin {
                         }
                     }
                 }
-                // TODO
                 return params;
             } catch (Exception e) {
                 throw new IOException(e);
@@ -275,36 +441,23 @@ public class Admin {
     }
 
     @Provider
-    public static class ResolutionProvider implements MessageBodyWriter<Resolution> {
-        public boolean isWriteable(Class<?> aClass, Type type, Annotation[] annotations, MediaType mediaType) {
-            return Resolution.class.isAssignableFrom(aClass);
+    public static class ResolutionProvider extends AbstractProvider<Resolution> {
+        @Override
+        protected Class<Resolution> getMessageClass() {
+            return Resolution.class;
         }
-
-        public long getSize(Resolution resolution, Class<?> aClass, Type type, Annotation[] annotations, MediaType mediaType) {
-            return -1;
-        }
-
-        public void writeTo(Resolution resolution, Class<?> aClass, Type type, Annotation[] annotations, MediaType mediaType, MultivaluedMap<String, Object> stringObjectMultivaluedMap, OutputStream outputStream) throws IOException, WebApplicationException {
-            Writer osw = new OutputStreamWriter(outputStream);
-            XmlWriter w = new XmlWriter(osw);
-            w.element(RESOLUTION);
-            // TODO
-            w.end();
-            osw.flush();
+        @Override
+        protected void writeXml(XmlWriter w, Resolution resolution) throws IOException {
+            writeResolution(w, resolution);
         }
     }
 
     @Provider
-    public static class ResourceProvider implements MessageBodyWriter<Resource> {
-
-        public boolean isWriteable(Class<?> aClass, Type type, Annotation[] annotations, MediaType mediaType) {
-            return Resource.class.isAssignableFrom(aClass);
+    public static class ResourceProvider extends AbstractProvider<Resource> {
+        @Override
+        protected Class<Resource> getMessageClass() {
+            return Resource.class;  //To change body of implemented methods use File | Settings | File Templates.
         }
-
-        public long getSize(Resource resource, Class<?> aClass, Type type, Annotation[] annotations, MediaType mediaType) {
-            return -1;
-        }
-
         public void writeTo(Resource resource, Class<?> aClass, Type type, Annotation[] annotations, MediaType mediaType, MultivaluedMap<String, Object> stringObjectMultivaluedMap, OutputStream outputStream) throws IOException, WebApplicationException {
             Writer w = new OutputStreamWriter(outputStream);
             new DataModelHelperImpl().writeResource(resource, w);
@@ -313,256 +466,139 @@ public class Admin {
     }
 
     @Provider
-    public static class ResourceRefsProvider implements MessageBodyWriter<ResourceRefs> {
-
-        public boolean isWriteable(Class<?> aClass, Type type, Annotation[] annotations, MediaType mediaType) {
-            return ResourceRefs.class.isAssignableFrom(aClass);
+    public static class ResourceRefsProvider extends AbstractProvider<ResourceRefs> {
+        @Override
+        protected Class<ResourceRefs> getMessageClass() {
+            return ResourceRefs.class;
         }
-
-        public long getSize(ResourceRefs resourceRefs, Class<?> aClass, Type type, Annotation[] annotations, MediaType mediaType) {
-            return -1;
-        }
-
-        public void writeTo(ResourceRefs refs, Class<?> aClass, Type type, Annotation[] annotations, MediaType mediaType, MultivaluedMap<String, Object> stringObjectMultivaluedMap, OutputStream outputStream) throws IOException, WebApplicationException {
-            Writer osw = new OutputStreamWriter(outputStream);
-            XmlWriter w = new XmlWriter(osw);
-            w.element(RESOURCES);
-            for (ResourceRef ref : refs.getResources()) {
-                w.element(RESOURCE);
-                w.attribute(ID, ref.getId());
-                if (ref.getRepository() != null) {
-                    w.attribute(REPOSITORY, ref.getRepository());
-                }
-                w.end();
-            }
-            w.end();
-            osw.flush();
+        @Override
+        protected void writeXml(XmlWriter w, ResourceRefs resourceRefs) throws IOException {
+            writeResourceRefs(w, resourceRefs);
         }
     }
 
     @Provider
-    public static class ResourceRefProvider implements MessageBodyWriter<ResourceRef> {
-
-        public boolean isWriteable(Class<?> aClass, Type type, Annotation[] annotations, MediaType mediaType) {
-            return ResourceRef.class.isAssignableFrom(aClass);
+    public static class ResourceRefProvider extends AbstractProvider<ResourceRef> {
+        @Override
+        protected Class<ResourceRef> getMessageClass() {
+            return ResourceRef.class;
         }
-
-        public long getSize(ResourceRef resourceRef, Class<?> aClass, Type type, Annotation[] annotations, MediaType mediaType) {
-            return -1;
-        }
-
-        public void writeTo(ResourceRef ref, Class<?> aClass, Type type, Annotation[] annotations, MediaType mediaType, MultivaluedMap<String, Object> stringObjectMultivaluedMap, OutputStream outputStream) throws IOException, WebApplicationException {
-            Writer osw = new OutputStreamWriter(outputStream);
-            XmlWriter w = new XmlWriter(osw);
-            w.element(RESOURCE);
-            w.attribute(ID, ref.getId());
-            if (ref.getRepository() != null) {
-                w.attribute(REPOSITORY, ref.getRepository());
-            }
-            w.end();
-            osw.flush();
+        @Override
+        protected void writeXml(XmlWriter w, ResourceRef resourceRef) throws IOException {
+            writeResourceRef(w, resourceRef);
         }
     }
 
     @Provider
-    public static class RepositoryRefProvider implements MessageBodyWriter<RepositoryRef>, MessageBodyReader<RepositoryRef> {
-
-        public boolean isWriteable(Class<?> aClass, Type type, Annotation[] annotations, MediaType mediaType) {
-            return RepositoryRef.class.isAssignableFrom(aClass);
+    public static class RepositoryRefProvider extends AbstractProvider<RepositoryRef> {
+        @Override
+        protected Class<RepositoryRef> getMessageClass() {
+            return RepositoryRef.class;
         }
-
-        public long getSize(RepositoryRef repositoryRef, Class<?> aClass, Type type, Annotation[] annotations, MediaType mediaType) {
-            return -1;
+        @Override
+        protected void writeXml(XmlWriter w, RepositoryRef repositoryRef) throws IOException {
+            writeRepositoryRef(w, repositoryRef);
         }
-
-        public void writeTo(RepositoryRef ref, Class<?> aClass, Type type, Annotation[] annotations, MediaType mediaType, MultivaluedMap<String, Object> stringObjectMultivaluedMap, OutputStream outputStream) throws IOException, WebApplicationException {
-            Writer osw = new OutputStreamWriter(outputStream);
-            XmlWriter w = new XmlWriter(osw);
-            w.element(REPOSITORY);
-            w.attribute(ID, ref.getId());
-            w.end();
-            osw.flush();
-        }
-
-        public boolean isReadable(Class<?> aClass, Type type, Annotation[] annotations, MediaType mediaType) {
-            return RepositoryRef.class.isAssignableFrom(aClass);
-        }
-
-        public RepositoryRef readFrom(Class<RepositoryRef> repositoryRefClass, Type type, Annotation[] annotations, MediaType mediaType, MultivaluedMap<String, String> stringStringMultivaluedMap, InputStream inputStream) throws IOException, WebApplicationException {
-            try {
-                KXmlParser parser = new KXmlParser();
-                parser.setInput(new InputStreamReader(inputStream));
-                if (parser.nextTag() != KXmlParser.START_TAG || !parser.getName().equals(REPOSITORY)) {
-                    throw new IOException("Expected tag '" + REPOSITORY + "'");
-                }
-                String id = parser.getAttributeValue(null, ID);
-                if (id == null) {
-                    throw new IllegalStateException("Missing attribute " + ID);
-                }
-                return new RepositoryRef(id);
-            } catch (Exception e) {
-                throw new IOException(e);
+        @Override
+        protected RepositoryRef parseXml(KXmlParser parser) throws IOException, XmlPullParserException {
+            if (parser.nextTag() != KXmlParser.START_TAG || !parser.getName().equals(REPOSITORY)) {
+                throw new IOException("Expected tag '" + REPOSITORY + "'");
             }
+            String id = parser.getAttributeValue(null, ID);
+            if (id == null) {
+                throw new IllegalStateException("Missing attribute " + ID);
+            }
+            return new RepositoryRef(id);
         }
     }
 
     @Provider
-    public static class RepositoryRefsProvider implements MessageBodyWriter<RepositoryRefs> {
-
-        public boolean isWriteable(Class<?> aClass, Type type, Annotation[] annotations, MediaType mediaType) {
-            return RepositoryRefs.class.isAssignableFrom(aClass);
+    public static class RepositoryRefsProvider extends AbstractProvider<RepositoryRefs> {
+        @Override
+        protected Class<RepositoryRefs> getMessageClass() {
+            return RepositoryRefs.class;
         }
-
-        public long getSize(RepositoryRefs repositoryRefs, Class<?> aClass, Type type, Annotation[] annotations, MediaType mediaType) {
-            return -1;
-        }
-
-        public void writeTo(RepositoryRefs refs, Class<?> aClass, Type type, Annotation[] annotations, MediaType mediaType, MultivaluedMap<String, Object> stringObjectMultivaluedMap, OutputStream outputStream) throws IOException, WebApplicationException {
-            Writer osw = new OutputStreamWriter(outputStream);
-            XmlWriter w = new XmlWriter(osw);
-            w.element(REPOSITORIES);
-            for (RepositoryRef repositoryRef : refs.getRepositories()) {
-                w.element(REPOSITORY);
-                w.attribute(ID, repositoryRef.getId());
-                w.end();
-            }
-            w.end();
-            osw.flush();
+        @Override
+        protected void writeXml(XmlWriter w, RepositoryRefs repositoryRefs) throws IOException {
+            writeRepositoryRefs(w, repositoryRefs);
         }
     }
 
     @Provider
-    public static class RepositoryProvider implements MessageBodyWriter<Repository> {
-
-        public boolean isWriteable(Class<?> aClass, Type type, Annotation[] annotations, MediaType mediaType) {
-            return Repository.class.isAssignableFrom(aClass);
+    public static class RepositoryProvider extends AbstractProvider<Repository> {
+        @Override
+        protected Class<Repository> getMessageClass() {
+            return Repository.class;
         }
-
-        public long getSize(Repository repository, Class<?> aClass, Type type, Annotation[] annotations, MediaType mediaType) {
-            return -1;
-        }
-
-        public void writeTo(Repository repository, Class<?> aClass, Type type, Annotation[] annotations, MediaType mediaType, MultivaluedMap<String, Object> stringObjectMultivaluedMap, OutputStream outputStream) throws IOException, WebApplicationException {
-            Writer osw = new OutputStreamWriter(outputStream);
-            XmlWriter w = new XmlWriter(osw);
-            w.element(REPOSITORY);
-            w.attribute(NAME, repository.getName());
-            w.attribute(URL, repository.getURI());
-            w.attribute(LASTMODIFIED, repository.getLastModified());
-            if (repository instanceof RepositoryImpl) {
-                Referral[] referrals = ((RepositoryImpl) repository).getReferrals();
-                if (referrals != null) {
-                    for (Referral referral : referrals) {
-                        w.element(REFERRAL);
-                        w.attribute(DEPTH, referral.getDepth());
-                        w.attribute(URL, referral.getUrl());
-                        w.end();
-                    }
-                }
-            }
-            for (Resource res : repository.getResources()) {
-                w.element(RESOURCE);
-                w.attribute(ID, res.getId());
-                w.attribute(NAME, res.getPresentationName());
-                w.end();
-            }
-            w.end();
-            osw.flush();
+        @Override
+        protected void writeXml(XmlWriter w, Repository repository) throws IOException {
+            writeRepository(w, repository);
         }
     }
 
     @Provider
-    public static class DiscoverProvider implements MessageBodyWriter<Discover>, MessageBodyReader<Discover> {
-
-        public boolean isWriteable(Class<?> aClass, Type type, Annotation[] annotations, MediaType mediaType) {
-            return Discover.class.isAssignableFrom(aClass);
+    public static class DiscoverProvider extends AbstractProvider<Discover> {
+        @Override
+        protected Class<Discover> getMessageClass() {
+            return Discover.class;
         }
-
-        public long getSize(Discover resource, Class<?> aClass, Type type, Annotation[] annotations, MediaType mediaType) {
-            return -1;
-        }
-
-        public void writeTo(Discover resource, Class<?> aClass, Type type, Annotation[] annotations, MediaType mediaType, MultivaluedMap<String, Object> stringObjectMultivaluedMap, OutputStream outputStream) throws IOException, WebApplicationException {
-            throw new UnsupportedOperationException();
-        }
-
-        public boolean isReadable(Class<?> aClass, Type type, Annotation[] annotations, MediaType mediaType) {
-            return Discover.class.isAssignableFrom(aClass);
-        }
-
-        public Discover readFrom(Class<Discover> discoverClass, Type type, Annotation[] annotations, MediaType mediaType, MultivaluedMap<String, String> stringStringMultivaluedMap, InputStream inputStream) throws IOException, WebApplicationException {
-            try {
-                KXmlParser parser = new KXmlParser();
-                parser.setInput(new InputStreamReader(inputStream));
-                if (parser.nextTag() != KXmlParser.START_TAG || !parser.getName().equals(DISCOVER)) {
-                    throw new IOException("Expected tag '" + DISCOVER + "'");
-                }
-                List<RepositoryRef> repos = new ArrayList<RepositoryRef>();
-                String filter = null;
-                List<Requirement> reqs = new ArrayList<Requirement>();
-                while (parser.nextTag() == KXmlParser.START_TAG) {
-                    if (REPOSITORY.equals(parser.getName())) {
-                        repos.add(new RepositoryRef(parser.nextText()));
-                    } else if (RepositoryParser.FILTER.equals(parser.getName())) {
-                        filter = parser.nextText();
-                    } else if (RepositoryParser.REQUIRE.equals(parser.getName())) {
+        @Override
+        protected Discover parseXml(KXmlParser parser) throws IOException, XmlPullParserException {
+            if (parser.nextTag() != KXmlParser.START_TAG || !parser.getName().equals(DISCOVER)) {
+                throw new IOException("Expected tag '" + DISCOVER + "'");
+            }
+            List<RepositoryRef> repos = new ArrayList<RepositoryRef>();
+            String filter = null;
+            List<Requirement> reqs = new ArrayList<Requirement>();
+            while (parser.nextTag() == KXmlParser.START_TAG) {
+                if (REPOSITORY.equals(parser.getName())) {
+                    repos.add(new RepositoryRef(parser.nextText()));
+                } else if (RepositoryParser.FILTER.equals(parser.getName())) {
+                    filter = parser.nextText();
+                } else if (RepositoryParser.REQUIRE.equals(parser.getName())) {
+                    try {
                         reqs.add(new PullParser().parseRequire(parser));
+                    } catch (IOException e) {
+                        throw e;
+                    } catch (XmlPullParserException e) {
+                        throw e;
+                    } catch (Exception e) {
+                        throw (IOException) new IOException().initCause(e);
                     }
                 }
-                return new Discover(repos, reqs, filter);
-            } catch (Exception e) {
-                throw new IOException(e);
             }
+            sanityCheckEndElement(parser, parser.getEventType(), DISCOVER);
+            return new Discover(repos, reqs, filter);
         }
     }
 
     public static class Resolve {
 
-        private List<Resource> addedResources = new ArrayList<Resource>();
-        private List<Requirement> addedRequirements = new ArrayList<Requirement>();
-        private List<Capability> globalCapabilities = new ArrayList<Capability>();
-        private List<String> repositories = new ArrayList<String>();
-        private List<Resource> localResources = new ArrayList<Resource>();
+        private final List<Resource> addedResources = new ArrayList<Resource>();
+        private final List<Requirement> addedRequirements = new ArrayList<Requirement>();
+        private final List<Capability> globalCapabilities = new ArrayList<Capability>();
+        private final List<String> repositories = new ArrayList<String>();
+        private final List<Resource> localResources = new ArrayList<Resource>();
         private int flags;
 
         public List<Resource> getAddedResources() {
             return addedResources;
         }
 
-        public void setAddedResources(List<Resource> addedResources) {
-            this.addedResources = addedResources;
-        }
-
         public List<Requirement> getAddedRequirements() {
             return addedRequirements;
-        }
-
-        public void setAddedRequirements(List<Requirement> addedRequirements) {
-            this.addedRequirements = addedRequirements;
         }
 
         public List<Capability> getGlobalCapabilities() {
             return globalCapabilities;
         }
 
-        public void setGlobalCapabilities(List<Capability> globalCapabilities) {
-            this.globalCapabilities = globalCapabilities;
-        }
-
         public List<String> getRepositories() {
             return repositories;
         }
 
-        public void setRepositories(List<String> repositories) {
-            this.repositories = repositories;
-        }
-
         public List<Resource> getLocalResources() {
             return localResources;
-        }
-
-        public void setLocalResources(List<Resource> localResources) {
-            this.localResources = localResources;
         }
 
         public int getFlags() {
@@ -574,54 +610,54 @@ public class Admin {
         }
     }
 
+    public static class ReasonRef {
+        private final Requirement requirement;
+        private final ResourceRef resource;
+
+        public ReasonRef(Requirement requirement, ResourceRef resource) {
+            this.requirement = requirement;
+            this.resource = resource;
+        }
+
+        public Requirement getRequirement() {
+            return requirement;
+        }
+
+        public ResourceRef getResource() {
+            return resource;
+        }
+    }
+
     public static class Resolution {
 
-        private List<ResourceRef> requiredResources;
-        private List<ResourceRef> optionalResources;
-        private Map<Resource, List<Reason>> reasons;
-        private List<Reason> unsatisfiedRequirements;
+        private final List<ResourceRef> requiredResources = new ArrayList<ResourceRef>();
+        private final List<ResourceRef> optionalResources = new ArrayList<ResourceRef>();
+        private final Map<ResourceRef, List<ReasonRef>> reasons = new LinkedHashMap<ResourceRef, List<ReasonRef>>();
+        private final List<ReasonRef> unsatisfiedRequirements = new ArrayList<ReasonRef>();
 
         public List<ResourceRef> getRequiredResources() {
             return requiredResources;
-        }
-
-        public void setRequiredResources(List<ResourceRef> requiredResources) {
-            this.requiredResources = requiredResources;
         }
 
         public List<ResourceRef> getOptionalResources() {
             return optionalResources;
         }
 
-        public void setOptionalResources(List<ResourceRef> optionalResources) {
-            this.optionalResources = optionalResources;
-        }
-
-        public Map<Resource, List<Reason>> getReasons() {
+        public Map<ResourceRef, List<ReasonRef>> getReasons() {
             return reasons;
         }
 
-        public void setReasons(Map<Resource, List<Reason>> reasons) {
-            this.reasons = reasons;
-        }
-
-        public List<Reason> getUnsatisfiedRequirements() {
+        public List<ReasonRef> getUnsatisfiedRequirements() {
             return unsatisfiedRequirements;
         }
 
-        public void setUnsatisfiedRequirements(List<Reason> unsatisfiedRequirements) {
-            this.unsatisfiedRequirements = unsatisfiedRequirements;
-        }
     }
 
     public static class Discover {
 
-        private List<RepositoryRef> repositories = new ArrayList<RepositoryRef>();
-        private List<Requirement> requirements = new ArrayList<Requirement>();
-        private String filter;
-
-        public Discover() {
-        }
+        private final List<RepositoryRef> repositories;
+        private final List<Requirement> requirements;
+        private final String filter;
 
         public Discover(List<RepositoryRef> repositories, List<Requirement> requirements, String filter) {
             this.repositories = repositories;
@@ -645,10 +681,7 @@ public class Admin {
 
     public static class ResourceRefs {
 
-        private List<ResourceRef> resources;
-
-        public ResourceRefs() {
-        }
+        private final List<ResourceRef> resources;
 
         public ResourceRefs(List<ResourceRef> resources) {
             this.resources = resources;
@@ -661,12 +694,8 @@ public class Admin {
 
     public static class ResourceRef {
 
-        private String id;
-        private String repository;
-
-        public ResourceRef() {
-            this(null, null);
-        }
+        private final String id;
+        private final String repository;
 
         public ResourceRef(String repository, String id) {
             this.id = id;
@@ -685,10 +714,7 @@ public class Admin {
 
     public static class RepositoryRefs {
 
-        private List<RepositoryRef> repositories;
-
-        public RepositoryRefs() {
-        }
+        private final List<RepositoryRef> repositories;
 
         public RepositoryRefs(List<RepositoryRef> repositories) {
             this.repositories = repositories;
@@ -701,10 +727,7 @@ public class Admin {
 
     public static class RepositoryRef {
 
-        private String id;
-
-        public RepositoryRef() {
-        }
+        private final String id;
 
         public RepositoryRef(String id) {
             this.id = id;

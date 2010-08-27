@@ -31,7 +31,9 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import org.apache.felix.bundlerepository.Capability;
 import org.apache.felix.bundlerepository.DataModelHelper;
+import org.apache.felix.bundlerepository.Reason;
 import org.apache.felix.bundlerepository.Repository;
 import org.apache.felix.bundlerepository.RepositoryAdmin;
 import org.apache.felix.bundlerepository.Requirement;
@@ -39,8 +41,10 @@ import org.apache.felix.bundlerepository.Resolver;
 import org.apache.felix.bundlerepository.Resource;
 import org.apache.felix.bundlerepository.impl.DataModelHelperImpl;
 import org.apache.felix.bundlerepository.impl.LocalRepositoryImpl;
+import org.apache.felix.bundlerepository.impl.ReasonImpl;
 import org.apache.felix.bundlerepository.impl.Referral;
 import org.apache.felix.bundlerepository.impl.RepositoryImpl;
+import org.apache.felix.bundlerepository.impl.RequirementImpl;
 import org.apache.felix.bundlerepository.impl.SystemRepositoryImpl;
 import org.apache.felix.bundlerepository.impl.XmlWriter;
 import org.kxml2.io.KXmlParser;
@@ -58,6 +62,11 @@ public class RepositoryAdminProxy implements RepositoryAdmin {
     private final Map<String, RepositoryImpl> repositories = new HashMap<String, RepositoryImpl>();
     private final DataModelHelper helper = new DataModelHelperImpl();
     private final String remoteObrUrl;
+    private static final String REQUIRED_RESOURCES = "required-resources";
+    private static final String OPTIONAL_RESOURCES = "optional-resources";
+    private static final String REASONS = "reasons";
+    private static final String UNSATISFIED_REQUIREMENTS = "unsatisfied-requirements";
+    private static final String REASON = "reason";
 
     public RepositoryAdminProxy(String remoteObrUrl, SystemRepositoryImpl system, LocalRepositoryImpl local) {
         this.remoteObrUrl = remoteObrUrl;
@@ -220,6 +229,9 @@ public class RepositoryAdminProxy implements RepositoryAdmin {
             Writer w = new OutputStreamWriter(con.getOutputStream());
             XmlWriter xw = new XmlWriter(w);
             xw.element("resolve");
+            xw.element("flags");
+            xw.text(params.getFlags());
+            xw.end();
             xw.element("repositories");
             for (String rep : params.getRepositories()) {
                 xw.element("repository").attribute("id", rep).end();
@@ -231,7 +243,24 @@ public class RepositoryAdminProxy implements RepositoryAdmin {
                 helper.writeResource(res, w);
             }
             xw.end();
-            // TODO
+            xw.element("added-requirements");
+            xw.text("");
+            for (Requirement req : params.getAddedRequirements()) {
+                helper.writeRequirement(req, w);
+            }
+            xw.end();
+            xw.element("global-capabilities");
+            xw.text("");
+            for (Capability cap : params.getGlobalCapabilities()) {
+                helper.writeCapability(cap, w);
+            }
+            xw.end();
+            xw.element("local-resources");
+            xw.text("");
+            for (Resource res : params.getLocalResources()) {
+                helper.writeResource(res, w);
+            }
+            xw.end();
             xw.end();
             w.close();
             is = con.getInputStream();
@@ -269,11 +298,95 @@ public class RepositoryAdminProxy implements RepositoryAdmin {
     private static final String REFERRAL = "referral";
     private static final String DEPTH = "depth";
     private static final String URL = "url";
+    private static final String RESOLUTION = "resolution";
+    public static final String REQUIRE = "require";
+    public static final String FILTER = "filter";
+    public static final String EXTEND = "extend";
+    public static final String MULTIPLE = "multiple";
+    public static final String OPTIONAL = "optional";
 
     private Resolution parseResolution(Reader r) throws Exception {
-        Resolution res = new Resolution();
-        // TODO
-        return res;
+        XmlPullParser reader = new KXmlParser();
+        reader.setInput(r);
+        int event = reader.nextTag();
+        if (event != XmlPullParser.START_TAG || !RESOLUTION.equals(reader.getName())) {
+            throw new Exception("Expected element '" + RESOLUTION + "' at the root of the document");
+        }
+        return parseResolution(reader);
+    }
+
+    private Resolution parseResolution(XmlPullParser reader) throws Exception {
+        int event;
+        Resolution resolution = new Resolution();
+        while ((event = reader.nextTag()) == XmlPullParser.START_TAG) {
+            String element = reader.getName();
+            if (REQUIRED_RESOURCES.equals(element)) {
+                while ((event = reader.nextTag()) == XmlPullParser.START_TAG) {
+                    element = reader.getName();
+                    if (RESOURCE.equals(element)) {
+                        Resource res = parseResourceRef(reader, null);
+                        resolution.getRequiredResources().add(res);
+                    } else {
+                        ignoreTag(reader);
+                    }
+                }
+                // Sanity check
+                sanityCheckEndElement(reader, event, REQUIRED_RESOURCES);
+            } else if (OPTIONAL_RESOURCES.equals(element)) {
+                while ((event = reader.nextTag()) == XmlPullParser.START_TAG) {
+                    element = reader.getName();
+                    if (RESOURCE.equals(element)) {
+                        Resource res = parseResourceRef(reader, null);
+                        resolution.getRequiredResources().add(res);
+                    } else {
+                        ignoreTag(reader);
+                    }
+                }
+                // Sanity check
+                sanityCheckEndElement(reader, event, OPTIONAL_RESOURCES);
+            } else if (REASONS.equals(element)) {
+
+                // TODO
+                ignoreTag(reader);
+
+            } else if (UNSATISFIED_REQUIREMENTS.equals(element)) {
+                while ((event = reader.nextTag()) == XmlPullParser.START_TAG) {
+                    element = reader.getName();
+                    if (REASON.equals(element)) {
+                        Reason reason = parseReason(reader);
+                        resolution.getUnsatisfiedRequirements().add(reason);
+                    } else {
+                        ignoreTag(reader);
+                    }
+                }
+                // Sanity check
+                sanityCheckEndElement(reader, event, UNSATISFIED_REQUIREMENTS);
+            } else {
+                ignoreTag(reader);
+            }
+        }
+        // Sanity check
+        sanityCheckEndElement(reader, event, RESOLUTION);
+        return resolution;
+    }
+
+    private ReasonImpl parseReason(XmlPullParser reader) throws Exception {
+        int event;
+        Resource resource = null;
+        Requirement requirement = null;
+        while ((event = reader.nextTag()) == XmlPullParser.START_TAG) {
+            String element = reader.getName();
+            if (RESOURCE.equals(element)) {
+                resource = parseResourceRef(reader, null);
+            } else if (REQUIRE.equals(element)) {
+                requirement = parseRequire(reader);
+            } else {
+                ignoreTag(reader);
+            }
+        }
+        // Sanity check
+        sanityCheckEndElement(reader, event, REASON);
+        return new ReasonImpl(resource, requirement);
     }
 
     private RepositoryImpl parseRepository(Reader r, String repositoryId) throws Exception {
@@ -411,6 +524,60 @@ public class RepositoryAdminProxy implements RepositoryAdmin {
         }
         sanityCheckEndElement(reader, reader.nextTag(), RESOURCE);
         return resource;
+    }
+
+    public RequirementImpl parseRequire(XmlPullParser reader) throws Exception
+    {
+        RequirementImpl requirement = new RequirementImpl();
+        for (int i = 0, nb = reader.getAttributeCount(); i < nb; i++)
+        {
+            String name = reader.getAttributeName(i);
+            String value = reader.getAttributeValue(i);
+            if (NAME.equals(name))
+            {
+                requirement.setName(value);
+            }
+            else if (FILTER.equals(name))
+            {
+                requirement.setFilter(value);
+            }
+            else if (EXTEND.equals(name))
+            {
+                requirement.setExtend(Boolean.parseBoolean(value));
+            }
+            else if (MULTIPLE.equals(name))
+            {
+                requirement.setMultiple(Boolean.parseBoolean(value));
+            }
+            else if (OPTIONAL.equals(name))
+            {
+                requirement.setOptional(Boolean.parseBoolean(value));
+            }
+        }
+        int event;
+        StringBuffer sb = null;
+        while ((event = reader.next()) != XmlPullParser.END_TAG)
+        {
+            switch (event)
+            {
+                case XmlPullParser.START_TAG:
+                    throw new Exception("Unexpected element inside <require/> element");
+                case XmlPullParser.TEXT:
+                    if (sb == null)
+                    {
+                        sb = new StringBuffer();
+                    }
+                    sb.append(reader.getText());
+                    break;
+            }
+        }
+        if (sb != null)
+        {
+            requirement.addText(sb.toString());
+        }
+        // Sanity check
+        sanityCheckEndElement(reader, event, REQUIRE);
+        return requirement;
     }
 
     private void ignoreTag(XmlPullParser reader) throws IOException, XmlPullParserException {
