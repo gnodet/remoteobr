@@ -8,6 +8,7 @@ import java.io.OutputStreamWriter;
 import java.io.Writer;
 import java.lang.annotation.Annotation;
 import java.lang.reflect.Type;
+import java.net.URI;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
@@ -30,6 +31,7 @@ import javax.ws.rs.ext.MessageBodyWriter;
 import javax.ws.rs.ext.Provider;
 
 import org.apache.felix.bundlerepository.Capability;
+import org.apache.felix.bundlerepository.Property;
 import org.apache.felix.bundlerepository.Reason;
 import org.apache.felix.bundlerepository.Repository;
 import org.apache.felix.bundlerepository.RepositoryAdmin;
@@ -77,6 +79,7 @@ public class Admin {
 
     @GET
     @Path("repositories")
+    @Consumes("application/xml")
     @Produces("application/xml")
     public RepositoryRefs getRepositories() {
         List<RepositoryRef> repos = new ArrayList<RepositoryRef>();
@@ -88,6 +91,7 @@ public class Admin {
 
     @GET
     @Path("repositories/{repId}")
+    @Consumes("application/xml")
     @Produces("application/xml")
     public Repository getRepository(@PathParam("repId") String repId) {
         for (Repository repo : admin.listRepositories()) {
@@ -101,6 +105,7 @@ public class Admin {
     @POST
     @Path("repositories")
     @Consumes("application/xml")
+    @Produces("application/xml")
     public Repository addRepository(RepositoryRef ref) throws Exception {
         return admin.addRepository(ref.getId());
     }
@@ -108,12 +113,14 @@ public class Admin {
     @DELETE
     @Path("repositories/{repId}")
     @Consumes("application/xml")
+    @Produces("application/xml")
     public void deleteRepository(@PathParam("repId") String repId) {
         admin.removeRepository(repId);
     }
 
     @GET
     @Path("repositories/{repId}/resources")
+    @Consumes("application/xml")
     @Produces("application/xml")
     public ResourceRefs getResources(@PathParam("repId") String repId) {
         for (Repository repo : admin.listRepositories()) {
@@ -130,6 +137,7 @@ public class Admin {
 
     @GET
     @Path("resources")
+    @Consumes("application/xml")
     @Produces("application/xml")
     public Resource getResource(@QueryParam("repId") String repId, @QueryParam("resId") String resId) {
         for (Repository repo : admin.listRepositories()) {
@@ -205,8 +213,12 @@ public class Admin {
         for (Requirement req : params.getAddedRequirements()) {
             resolver.add(req);
         }
-        for (Resource res : params.getAddedResources()) {
-            resolver.add(res);
+        for (Object res : params.getAddedResources()) {
+            if (res instanceof Resource) {
+                resolver.add((Resource) res);
+            } else if (res instanceof ResourceRef) {
+                resolver.add(findResource((ResourceRef) res));
+            }
         }
         Resolution res = new Resolution();
         if (resolver.resolve(params.getFlags())) {
@@ -230,6 +242,19 @@ public class Admin {
             }
         }
         return res;
+    }
+
+    private Resource findResource(ResourceRef ref) {
+        for (Repository rep : admin.listRepositories()) {
+            if (rep.getURI().equals(ref.getRepository())) {
+                for (Resource res : rep.getResources()) {
+                    if (res.getId().equals(ref.getId())) {
+                        return res;
+                    }
+                }
+            }
+        }
+        throw new IllegalArgumentException("Resource '" + ref.getId() + "' not found in repository " + ref.getRepository());
     }
 
     private ReasonRef getReasonRef(Reason reason) {
@@ -270,9 +295,11 @@ public class Admin {
             .attribute(RepositoryParser.FILTER, requirement.getFilter())
             .attribute(RepositoryParser.EXTEND, Boolean.toString(requirement.isExtend()))
             .attribute(RepositoryParser.MULTIPLE, Boolean.toString(requirement.isMultiple()))
-            .attribute(RepositoryParser.OPTIONAL, Boolean.toString(requirement.isOptional()))
-            .text(requirement.getComment().trim())
-            .end();
+            .attribute(RepositoryParser.OPTIONAL, Boolean.toString(requirement.isOptional()));
+        if (requirement.getComment() != null) {
+            w.text(requirement.getComment().trim());
+        }
+        w.end();
     }
 
     private static void writeResolution(XmlWriter w, Resolution resolution) throws IOException {
@@ -335,6 +362,79 @@ public class Admin {
             writeResourceRef(w, new ResourceRef(null, res.getId()));
         }
         w.end();
+    }
+
+    private static void writeResource(XmlWriter w, Resource resource) throws IOException
+    {
+        w.element(RepositoryParser.RESOURCE)
+            .attribute(Resource.ID, resource.getId())
+            .attribute(Resource.SYMBOLIC_NAME, resource.getSymbolicName())
+            .attribute(Resource.PRESENTATION_NAME, resource.getPresentationName())
+            .attribute(Resource.URI, getRelativeUri(resource, Resource.URI))
+            .attribute(Resource.VERSION, resource.getVersion().toString());
+
+        w.textElement(Resource.DESCRIPTION, resource.getProperties().get(Resource.DESCRIPTION))
+            .textElement(Resource.SIZE, resource.getProperties().get(Resource.SIZE))
+            .textElement(Resource.DOCUMENTATION_URI, getRelativeUri(resource, Resource.DOCUMENTATION_URI))
+            .textElement(Resource.SOURCE_URI, getRelativeUri(resource, Resource.SOURCE_URI))
+            .textElement(Resource.JAVADOC_URI, getRelativeUri(resource, Resource.JAVADOC_URI))
+            .textElement(Resource.LICENSE_URI, getRelativeUri(resource, Resource.LICENSE_URI));
+
+        String[] categories = resource.getCategories();
+        for (int i = 0; categories != null && i < categories.length; i++)
+        {
+            w.element(RepositoryParser.CATEGORY)
+                .attribute(RepositoryParser.ID, categories[i])
+                .end();
+        }
+        Capability[] capabilities = resource.getCapabilities();
+        for (int i = 0; capabilities != null && i < capabilities.length; i++)
+        {
+            writeCapability(w, capabilities[i]);
+        }
+        Requirement[] requirements = resource.getRequirements();
+        for (int i = 0; requirements != null && i < requirements.length; i++)
+        {
+            writeRequirement(w, requirements[i]);
+        }
+        w.end();
+    }
+
+    private static String getRelativeUri(Resource resource, String name)
+    {
+        String uri = (String) resource.getProperties().get(name);
+        if (resource instanceof ResourceImpl)
+        {
+            try
+            {
+                uri = URI.create(((ResourceImpl) resource).getRepository().getURI()).relativize(URI.create(uri)).toASCIIString();
+            }
+            catch (Throwable t)
+            {
+            }
+        }
+        return uri;
+    }
+
+    private static void writeCapability(XmlWriter w, Capability capability) throws IOException
+    {
+        w.element(RepositoryParser.CAPABILITY)
+            .attribute(RepositoryParser.NAME, capability.getName());
+        Property[] props = capability.getProperties();
+        for (int j = 0; props != null && j < props.length; j++)
+        {
+            writeProperty(w, props[j]);
+        }
+        w.end();
+    }
+
+    private static void writeProperty(XmlWriter w, Property property) throws IOException
+    {
+        w.element(RepositoryParser.P)
+            .attribute(RepositoryParser.N, property.getName())
+            .attribute(RepositoryParser.T, property.getType())
+            .attribute(RepositoryParser.V, property.getValue())
+            .end();
     }
 
     private static void sanityCheckEndElement(XmlPullParser reader, int event, String element) {
@@ -412,9 +512,14 @@ public class Admin {
                         }
                         parser.nextTag();
                     } else if ("added-resources".equals(parser.getName())) {
-                        while (parser.nextTag() == KXmlParser.START_TAG && RESOURCE.equals(parser.getName())) {
-                            Resource res = new PullParser().parseResource(parser);
-                            params.getAddedResources().add(res);
+                        while (parser.nextTag() == KXmlParser.START_TAG) {
+                            if (RESOURCE.equals(parser.getName())) {
+                                Resource res = new PullParser().parseResource(parser);
+                                params.getAddedResources().add(res);
+                            } else if ("resource-ref".equals(parser.getName())) {
+                                params.getAddedResources().add(new ResourceRef(parser.getAttributeValue(null, REPOSITORY), parser.getAttributeValue(null, ID)));
+                                sanityCheckEndElement(parser, parser.nextTag(), "resource-ref");
+                            }
                         }
                     } else if ("added-requirements".equals(parser.getName())) {
                         while (parser.nextTag() == KXmlParser.START_TAG && RepositoryParser.REQUIRE.equals(parser.getName())) {
@@ -458,10 +563,10 @@ public class Admin {
         protected Class<Resource> getMessageClass() {
             return Resource.class;  //To change body of implemented methods use File | Settings | File Templates.
         }
-        public void writeTo(Resource resource, Class<?> aClass, Type type, Annotation[] annotations, MediaType mediaType, MultivaluedMap<String, Object> stringObjectMultivaluedMap, OutputStream outputStream) throws IOException, WebApplicationException {
-            Writer w = new OutputStreamWriter(outputStream);
-            new DataModelHelperImpl().writeResource(resource, w);
-            w.flush();
+
+        @Override
+        protected void writeXml(XmlWriter w, Resource resource) throws IOException {
+            writeResource(w, resource);
         }
     }
 
@@ -574,14 +679,14 @@ public class Admin {
 
     public static class Resolve {
 
-        private final List<Resource> addedResources = new ArrayList<Resource>();
+        private final List<Object> addedResources = new ArrayList<Object>();
         private final List<Requirement> addedRequirements = new ArrayList<Requirement>();
         private final List<Capability> globalCapabilities = new ArrayList<Capability>();
         private final List<String> repositories = new ArrayList<String>();
         private final List<Resource> localResources = new ArrayList<Resource>();
         private int flags;
 
-        public List<Resource> getAddedResources() {
+        public List<Object> getAddedResources() {
             return addedResources;
         }
 

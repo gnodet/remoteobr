@@ -33,20 +33,14 @@ import java.util.Map;
 
 import org.apache.felix.bundlerepository.Capability;
 import org.apache.felix.bundlerepository.DataModelHelper;
+import org.apache.felix.bundlerepository.InterruptedResolutionException;
 import org.apache.felix.bundlerepository.Reason;
 import org.apache.felix.bundlerepository.Repository;
 import org.apache.felix.bundlerepository.RepositoryAdmin;
 import org.apache.felix.bundlerepository.Requirement;
 import org.apache.felix.bundlerepository.Resolver;
 import org.apache.felix.bundlerepository.Resource;
-import org.apache.felix.bundlerepository.impl.DataModelHelperImpl;
-import org.apache.felix.bundlerepository.impl.LocalRepositoryImpl;
-import org.apache.felix.bundlerepository.impl.ReasonImpl;
-import org.apache.felix.bundlerepository.impl.Referral;
-import org.apache.felix.bundlerepository.impl.RepositoryImpl;
-import org.apache.felix.bundlerepository.impl.RequirementImpl;
-import org.apache.felix.bundlerepository.impl.SystemRepositoryImpl;
-import org.apache.felix.bundlerepository.impl.XmlWriter;
+import org.apache.felix.bundlerepository.impl.*;
 import org.kxml2.io.KXmlParser;
 import org.osgi.framework.InvalidSyntaxException;
 import org.xmlpull.v1.XmlPullParser;
@@ -190,7 +184,7 @@ public class RepositoryAdminProxy implements RepositoryAdmin {
                 xw.element("repository").text(repo).end();
             }
             for (Requirement req : reqs) {
-                helper.writeRequirement(req, w);
+                toXml(xw, req);
             }
             xw.end();
             w.close();
@@ -221,7 +215,7 @@ public class RepositoryAdminProxy implements RepositoryAdmin {
         }
     }
 
-    public Resolution resolve(ResolveParams params) {
+    public ResolutionResults resolve(ResolutionParams params) {
         InputStream is = null;
         try {
             URLConnection con = open("resolver");
@@ -240,13 +234,17 @@ public class RepositoryAdminProxy implements RepositoryAdmin {
             xw.element("added-resources");
             xw.text("");
             for (Resource res : params.getAddedResources()) {
-                helper.writeResource(res, w);
+                if (res instanceof ResourceProxy) {
+                    xw.element("resource-ref").attribute("id", res.getId()).attribute("repository", ((ResourceProxy) res).getRepository()).end();
+                } else {
+                    helper.writeResource(res, w);
+                }
             }
             xw.end();
             xw.element("added-requirements");
             xw.text("");
             for (Requirement req : params.getAddedRequirements()) {
-                helper.writeRequirement(req, w);
+                toXml(xw, req);
             }
             xw.end();
             xw.element("global-capabilities");
@@ -264,12 +262,37 @@ public class RepositoryAdminProxy implements RepositoryAdmin {
             xw.end();
             w.close();
             is = con.getInputStream();
+            for (;;) {
+                if (Thread.interrupted()) {
+                    throw new InterruptedResolutionException();
+                }
+                if (is.available() > 0) {
+                    break;
+                }
+                Thread.sleep(1);
+            }
             return parseResolution(new InputStreamReader(is));
+        } catch (InterruptedResolutionException e) {
+            throw e;
         } catch (Exception e) {
             throw new RuntimeException(e);
         } finally {
             close(is);
         }
+    }
+
+    private static void toXml(XmlWriter w, Requirement requirement) throws IOException
+    {
+        w.element(RepositoryParser.REQUIRE)
+            .attribute(RepositoryParser.NAME, requirement.getName())
+            .attribute(RepositoryParser.FILTER, requirement.getFilter())
+            .attribute(RepositoryParser.EXTEND, Boolean.toString(requirement.isExtend()))
+            .attribute(RepositoryParser.MULTIPLE, Boolean.toString(requirement.isMultiple()))
+            .attribute(RepositoryParser.OPTIONAL, Boolean.toString(requirement.isOptional()));
+        if (requirement.getComment() != null) {
+            w.text(requirement.getComment().trim());
+        }
+        w.end();
     }
 
     private URLConnection open(String url) throws IOException {
@@ -305,7 +328,7 @@ public class RepositoryAdminProxy implements RepositoryAdmin {
     public static final String MULTIPLE = "multiple";
     public static final String OPTIONAL = "optional";
 
-    private Resolution parseResolution(Reader r) throws Exception {
+    private ResolutionResults parseResolution(Reader r) throws Exception {
         XmlPullParser reader = new KXmlParser();
         reader.setInput(r);
         int event = reader.nextTag();
@@ -315,9 +338,9 @@ public class RepositoryAdminProxy implements RepositoryAdmin {
         return parseResolution(reader);
     }
 
-    private Resolution parseResolution(XmlPullParser reader) throws Exception {
+    private ResolutionResults parseResolution(XmlPullParser reader) throws Exception {
         int event;
-        Resolution resolution = new Resolution();
+        ResolutionResults resolutionResults = new ResolutionResults();
         while ((event = reader.nextTag()) == XmlPullParser.START_TAG) {
             String element = reader.getName();
             if (REQUIRED_RESOURCES.equals(element)) {
@@ -325,7 +348,7 @@ public class RepositoryAdminProxy implements RepositoryAdmin {
                     element = reader.getName();
                     if (RESOURCE.equals(element)) {
                         Resource res = parseResourceRef(reader, null);
-                        resolution.getRequiredResources().add(res);
+                        resolutionResults.getRequiredResources().add(res);
                     } else {
                         ignoreTag(reader);
                     }
@@ -337,7 +360,7 @@ public class RepositoryAdminProxy implements RepositoryAdmin {
                     element = reader.getName();
                     if (RESOURCE.equals(element)) {
                         Resource res = parseResourceRef(reader, null);
-                        resolution.getRequiredResources().add(res);
+                        resolutionResults.getOptionalResources().add(res);
                     } else {
                         ignoreTag(reader);
                     }
@@ -354,7 +377,7 @@ public class RepositoryAdminProxy implements RepositoryAdmin {
                     element = reader.getName();
                     if (REASON.equals(element)) {
                         Reason reason = parseReason(reader);
-                        resolution.getUnsatisfiedRequirements().add(reason);
+                        resolutionResults.getUnsatisfiedRequirements().add(reason);
                     } else {
                         ignoreTag(reader);
                     }
@@ -367,7 +390,7 @@ public class RepositoryAdminProxy implements RepositoryAdmin {
         }
         // Sanity check
         sanityCheckEndElement(reader, event, RESOLUTION);
-        return resolution;
+        return resolutionResults;
     }
 
     private ReasonImpl parseReason(XmlPullParser reader) throws Exception {
@@ -377,6 +400,8 @@ public class RepositoryAdminProxy implements RepositoryAdmin {
         while ((event = reader.nextTag()) == XmlPullParser.START_TAG) {
             String element = reader.getName();
             if (RESOURCE.equals(element)) {
+                resource = new PullParser().parseResource(reader);
+            } else if ("resource-ref".equals(element)) {
                 resource = parseResourceRef(reader, null);
             } else if (REQUIRE.equals(element)) {
                 requirement = parseRequire(reader);

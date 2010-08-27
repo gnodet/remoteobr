@@ -22,7 +22,7 @@ import org.apache.felix.bundlerepository.Capability;
 import org.apache.felix.bundlerepository.Requirement;
 import org.apache.felix.bundlerepository.Resource;
 
-public class ResolveParams {
+public class ResolutionParams {
 
     private Set<Resource> addedResources = new LinkedHashSet<Resource>();
     private Set<Requirement> addedRequirements = new LinkedHashSet<Requirement>();

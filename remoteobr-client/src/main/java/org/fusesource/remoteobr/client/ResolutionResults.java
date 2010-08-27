@@ -23,7 +23,7 @@ import java.util.Set;
 import org.apache.felix.bundlerepository.Reason;
 import org.apache.felix.bundlerepository.Resource;
 
-public class Resolution {
+public class ResolutionResults {
 
     private Set<Resource> requiredResources = new LinkedHashSet<Resource>();
     private Set<Resource> optionalResources = new LinkedHashSet<Resource>();

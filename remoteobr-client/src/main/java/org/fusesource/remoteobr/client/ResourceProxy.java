@@ -45,6 +45,10 @@ public class ResourceProxy implements Resource {
         return id;
     }
 
+    public String getRepository() {
+        return repository;
+    }
+
     public Map getProperties() {
         return getResource().getProperties();
     }

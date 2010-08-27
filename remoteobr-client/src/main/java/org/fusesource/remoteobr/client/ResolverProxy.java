@@ -35,8 +35,8 @@ public class ResolverProxy implements Resolver {
 
     private final RepositoryAdminProxy client;
     private final Repository[] repositories;
-    private final ResolveParams params = new ResolveParams();
-    private Resolution result = new Resolution();
+    private final ResolutionParams params = new ResolutionParams();
+    private ResolutionResults results = new ResolutionResults();
 
     public ResolverProxy(RepositoryAdminProxy client, Repository[] repositories) {
         this.client = client;
@@ -50,7 +50,7 @@ public class ResolverProxy implements Resolver {
     }
 
     public synchronized void add(Resource resource) {
-        result = null;
+        results = null;
         params.getAddedResources().add(resource);
     }
 
@@ -59,7 +59,7 @@ public class ResolverProxy implements Resolver {
     }
 
     public synchronized void add(Requirement requirement) {
-        result = null;
+        results = null;
         params.getAddedRequirements().add(requirement);
     }
 
@@ -68,7 +68,7 @@ public class ResolverProxy implements Resolver {
     }
 
     public synchronized void addGlobalCapability(Capability capability) {
-        result = null;
+        results = null;
         params.getGlobalCapabilities().add(capability);
     }
 
@@ -77,34 +77,34 @@ public class ResolverProxy implements Resolver {
     }
 
     public synchronized Resource[] getRequiredResources() {
-        if (result != null)
+        if (results != null)
         {
-            return result.getRequiredResources().toArray(new Resource[result.getRequiredResources().size()]);
+            return results.getRequiredResources().toArray(new Resource[results.getRequiredResources().size()]);
         }
         throw new IllegalStateException("The resources have not been resolved.");
     }
 
     public synchronized Resource[] getOptionalResources() {
-        if (result != null)
+        if (results != null)
         {
-            return result.getOptionalResources().toArray(new Resource[result.getOptionalResources().size()]);
+            return results.getOptionalResources().toArray(new Resource[results.getOptionalResources().size()]);
         }
         throw new IllegalStateException("The resources have not been resolved.");
     }
 
     public synchronized Reason[] getReason(Resource resource) {
-        if (result != null)
+        if (results != null)
         {
-            Set<Reason> l = result.getReasons().get(resource);
+            Set<Reason> l = results.getReasons().get(resource);
             return l != null ? l.toArray(new Reason[l.size()]) : null;
         }
         throw new IllegalStateException("The resources have not been resolved.");
     }
 
     public synchronized Reason[] getUnsatisfiedRequirements() {
-        if (result != null)
+        if (results != null)
         {
-            return result.getUnsatisfiedRequirements().toArray(new Reason[result.getUnsatisfiedRequirements().size()]);
+            return results.getUnsatisfiedRequirements().toArray(new Reason[results.getUnsatisfiedRequirements().size()]);
         }
         throw new IllegalStateException("The resources have not been resolved.");
     }
@@ -122,8 +122,8 @@ public class ResolverProxy implements Resolver {
             }
         }
         params.setLocalResources(resources);
-        result = client.resolve(params);
-        return result.getUnsatisfiedRequirements().isEmpty();
+        results = client.resolve(params);
+        return results.getUnsatisfiedRequirements().isEmpty();
     }
 
     public synchronized void deploy(int i) {

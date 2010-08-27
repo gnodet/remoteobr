@@ -32,16 +32,15 @@ public class Activator implements BundleActivator, ManagedService {
 
     private BundleContext bundleContext;
     private ServiceRegistration registration;
-    private Logger logger;
     private SystemRepositoryImpl system;
     private LocalRepositoryImpl local;
 
     public void start(BundleContext context) throws Exception {
         this.bundleContext = context;
-        logger = new Logger(bundleContext);
+        Logger logger = new Logger(bundleContext);
         system = new SystemRepositoryImpl(bundleContext, logger);
         local = new LocalRepositoryImpl(bundleContext, logger);
-        Hashtable props = new Hashtable();
+        Hashtable<String,String> props = new Hashtable<String,String>();
         props.put("service.pid", "org.fusesource.remoteobr");
         bundleContext.registerService(ManagedService.class.getName(), this, props);
     }
