@@ -472,7 +472,7 @@ public class Admin {
                 parser.setInput(new InputStreamReader(inputStream));
                 return parseXml(parser);
             } catch (Exception e) {
-                throw new IOException(e);
+                throw (IOException) new IOException().initCause(e);
             }
         }
 
@@ -540,7 +540,7 @@ public class Admin {
                 }
                 return params;
             } catch (Exception e) {
-                throw new IOException(e);
+                throw (IOException) new IOException().initCause(e);
             }
         }
     }
