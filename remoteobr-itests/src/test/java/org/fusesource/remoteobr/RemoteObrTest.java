@@ -17,7 +17,7 @@ package org.fusesource.remoteobr;
 
 import java.util.Hashtable;
 
-import com.sun.jersey.server.impl.container.servlet.ServletAdaptor;
+import com.sun.jersey.spi.container.servlet.ServletContainer;
 import org.apache.felix.bundlerepository.Repository;
 import org.apache.felix.bundlerepository.RepositoryAdmin;
 import org.apache.felix.bundlerepository.Requirement;
@@ -185,18 +185,15 @@ public class RemoteObrTest {
 
         EasyMock.replay(bundleContext, systemBundle);
 
-        RepositoryAdmin ra = new RepositoryAdminImpl(bundleContext, null);
-        Application.setAdmin(ra);
-
         server = new Server();
         SocketConnector connector = new SocketConnector();
         connector.setPort(8282);
         server.addConnector(connector);
         Context context = new Context(server, "/");
-        ServletAdaptor adaptor = new ServletAdaptor();
-        ServletHolder holder = new ServletHolder(adaptor);
+        ServletContainer servlet = new ServletContainer(new Application(new RepositoryAdminImpl(bundleContext, null)));
+        ServletHolder holder = new ServletHolder(servlet);
         holder.setInitParameter("javax.ws.rs.Application", Application.class.getName());
-        context.addServlet(holder, "/*");
+        context.addServlet(holder, "/obr/*");
         context.start();
         server.start();
 

@@ -54,7 +54,7 @@ import org.xmlpull.v1.XmlPullParser;
 import org.xmlpull.v1.XmlPullParserException;
 
 
-@Path("/obr")
+@Path("/")
 public class Admin {
 
     private static final String RESOURCE = "resource";

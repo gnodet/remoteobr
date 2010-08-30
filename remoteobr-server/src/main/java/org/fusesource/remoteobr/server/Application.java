@@ -23,14 +23,10 @@ import org.apache.felix.bundlerepository.RepositoryAdmin;
 
 public class Application extends javax.ws.rs.core.Application {
 
-    private static RepositoryAdmin admin;
+    private RepositoryAdmin admin;
 
-    public static RepositoryAdmin getAdmin() {
-        return Application.admin;
-    }
-
-    public static void setAdmin(RepositoryAdmin admin) {
-        Application.admin = admin;
+    public Application(RepositoryAdmin admin) {
+        this.admin = admin;
     }
 
     @Override
