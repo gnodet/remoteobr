@@ -531,14 +531,29 @@ public class RepositoryAdminProxy implements RepositoryAdmin {
         String id = reader.getAttributeValue(null, ID);
         if (repositoryId == null) {
             String repository = reader.getAttributeValue(null, REPOSITORY);
-            RepositoryImpl repo = repositories.get(repository);
-            if (repo == null) {
-                throw new IllegalStateException("Unknown repository '" + repository + "'");
-            }
-            for (Resource res : repo.getResources()) {
-                if (res.getId().equals(id)) {
-                    resource = res;
-                    break;
+            if (repository.equals(Repository.LOCAL)) {
+                for (Resource res : system.getResources()) {
+                    if (res.getId().equals(id)) {
+                        resource = res;
+                        break;
+                    }
+                }
+                for (Resource res : local.getResources()) {
+                    if (res.getId().equals(id)) {
+                        resource = res;
+                        break;
+                    }
+                }
+            } else {
+                Repository repo = repositories.get(repository);
+                if (repo == null) {
+                    throw new IllegalStateException("Unknown repository '" + repository + "'");
+                }
+                for (Resource res : repo.getResources()) {
+                    if (res.getId().equals(id)) {
+                        resource = res;
+                        break;
+                    }
                 }
             }
             if (resource == null) {

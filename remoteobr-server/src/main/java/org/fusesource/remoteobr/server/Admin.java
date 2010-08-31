@@ -39,6 +39,7 @@ import org.apache.felix.bundlerepository.Requirement;
 import org.apache.felix.bundlerepository.Resolver;
 import org.apache.felix.bundlerepository.Resource;
 import org.apache.felix.bundlerepository.impl.DataModelHelperImpl;
+import org.apache.felix.bundlerepository.impl.LocalRepositoryImpl;
 import org.apache.felix.bundlerepository.impl.PullParser;
 import org.apache.felix.bundlerepository.impl.Referral;
 import org.apache.felix.bundlerepository.impl.RepositoryImpl;
@@ -72,6 +73,8 @@ public class Admin {
     private static final String RESOLUTION = "resolution";
 
     private final RepositoryAdmin admin;
+
+    private static final Repository LOCAL_REPO = new RepositoryImpl() { { setURI(LOCAL); } };
 
     public Admin(RepositoryAdmin admin) {
         this.admin = admin;
@@ -533,7 +536,8 @@ public class Admin {
                         }
                     } else if ("local-resources".equals(parser.getName())) {
                         while (parser.nextTag() == KXmlParser.START_TAG && RESOURCE.equals(parser.getName())) {
-                            Resource res = new PullParser().parseResource(parser);
+                            ResourceImpl res = new PullParser().parseResource(parser);
+                            res.setRepository(LOCAL_REPO);
                             params.getLocalResources().add(res);
                         }
                     }
