@@ -36,6 +36,7 @@
         <module>remoteobr-server</module>
         <module>remoteobr-features</module>
         <module>remoteobr-itests</module>
+        <module>remoteobr-website</module>
   </modules>
 
     <dependencyManagement>
