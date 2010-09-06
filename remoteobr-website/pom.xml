@@ -99,6 +99,9 @@
                 <groupId>org.fusesource.scalate</groupId>
                 <artifactId>maven-scalate-plugin</artifactId>
                 <version>${scalate.version}</version>
+				<configuration>
+					<warSourceDirectory>${basedir}/target/webapp/</warSourceDirectory>
+				</configuration>
                 <executions>
                     <execution>
                         <goals>
