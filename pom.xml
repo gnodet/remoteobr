@@ -39,6 +39,29 @@
         <module>remoteobr-website</module>
   </modules>
 
+    <distributionManagement>
+      <repository>
+        <id>release.fusesource.org</id>
+        <name>RemoteOBR Release Repository</name>
+        <url>dav:http://fusesource.com/forge/dav/remoteobr/repo/release</url>
+      </repository>
+      <snapshotRepository>
+        <uniqueVersion>false</uniqueVersion>
+        <id>snapshot.fusesource.org</id>
+        <name>RemoteOBR Snapshot Repository</name>
+        <url>dav:http://fusesource.com/forge/dav/remoteobr/repo/snapshot</url>
+      </snapshotRepository>
+      <site>
+        <id>website.fusesource.org</id>
+        <name>website</name>
+<!--
+        <url>dav:http://fusesource.com/forge/dav/remoteobr/versions/snapshot</url>
+-->
+        <!-- TODO change me ASAP!!! -->
+        <url>dav:http://fusesource.com/forge/dav/remoteobr</url>
+      </site>
+    </distributionManagement>
+
     <dependencyManagement>
         <dependencies>
             <dependency>
