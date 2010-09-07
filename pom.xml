@@ -160,13 +160,6 @@
         </dependencies>
     </dependencyManagement>
 
-    <repositories>
-        <repository>
-            <id>java.net</id>
-            <url>http://download.java.net/maven/2/</url>
-        </repository>
-    </repositories>
-
     <build>
         <defaultGoal>install</defaultGoal>
         <plugins>
@@ -199,4 +192,34 @@
         </plugins>
     </build>
 
+    <profiles>
+        <!-- enables extra repositories which may have some
+             goodies that have not reached central yet -->
+        <profile>
+            <id>download</id>
+            <repositories>
+                <repository>
+                    <id>repo1.maven</id>
+                    <name>Maven Central Repo</name>
+                    <url>http://repo1.maven.org/maven2</url>
+                </repository>
+                <repository>
+                    <id>fusesource-nexus-snapshot</id>
+                    <name>FuseSource Nexus Snapshot Repository</name>
+                    <url>http://repo.fusesource.com/nexus/content/repositories/snapshots</url>
+                    <snapshots>
+                        <enabled>true</enabled>
+                    </snapshots>
+                    <releases>
+                        <enabled>false</enabled>
+                    </releases>
+                </repository>
+                <repository>
+                    <id>java.net.m2</id>
+                    <name>java.net Maven 2 Repo</name>
+                    <url>http://download.java.net/maven/2</url>
+                </repository>
+            </repositories>
+        </profile>
+    </profiles>
 </project>
