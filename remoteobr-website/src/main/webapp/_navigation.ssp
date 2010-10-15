@@ -1,0 +1,5 @@
+<ul>
+  <li><a href="${uri("/index.html")}">Home</a></li>
+  <li><a href="${uri("/source.html")}">Source</a></li>
+  <li><a href="${uri("/building.html")}">Building</a></li>
+</ul>

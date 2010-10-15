@@ -46,29 +46,7 @@
   %body
     #navigation
       .wrapper
-        %ul
-          - if (requestURI == "/index")
-            %li
-              %span Home
-          - else
-            %li
-              %a(href={uri("/index")}) 
-                Home
-          - if (requestURI == "/source")
-            %li
-              %span Source
-          - else
-            %li
-              %a(href={uri("/source")}) 
-                Source
-          - if (requestURI == "/building")
-            %li
-              %span Building
-          - else
-            %li
-              %a(href={uri("/building")}) 
-                Building
-
+        = include("/_navigation.ssp")
     #content
       .wrapper
         !~~ body
